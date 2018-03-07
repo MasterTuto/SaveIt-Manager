@@ -3,6 +3,7 @@ import wx
 import gamelist
 import os
 import utils
+import libs.mymc.ps2mc as ps2mc
 
 class App(wx.Frame):
 	def __init__(self, parent, title):
@@ -10,6 +11,7 @@ class App(wx.Frame):
 
 		# Window Parent
 		panel = wx.Panel(self, wx.ID_ANY)
+		self.panel = panel
 		self.CreateStatusBar() # Cria barra de status
 
 		# **** START MENUBAR ****
@@ -31,8 +33,6 @@ class App(wx.Frame):
 		self.opcoes.InsertColumn(1, "CÓDIGO", width=80)
 
 		# **** GAME DATA WIDGETS ****
-
-		data_box = wx.BoxSizer(wx.VERTICAL)
 
 		# NAME'S BOX
 		nome_box = wx.BoxSizer(wx.HORIZONTAL)
@@ -64,8 +64,22 @@ class App(wx.Frame):
 		vmc_box.Add(self.vmc)
 		vmc_box.Add(vmc_changing)
 
+		# VMC CONTENT BOX
+		vmc_content_box  = wx.BoxSizer(wx.VERTICAL)
+		
+		self.vmc_content_list = wx.ListCtrl(panel, size=(325, 200), style=wx.LC_REPORT | wx.BORDER_SUNKEN)
+		self.vmc_content_list.InsertColumn(0, "Nome", width=200)
+		self.vmc_content_list.InsertColumn(1, "Tamanho", width=200)
+
+		self.vmc_content_btn  = wx.Button(panel, label="Carregar VMC", size=(130, 25))
+		self.vmc_content_btn.Disable()
+		vmc_content_box.Add(self.vmc_content_list)
+		vmc_content_box.AddSpacer(3)
+		vmc_content_box.Add(self.vmc_content_btn, 0, wx.ALIGN_CENTER)
 
 		# MAIN BOX
+		data_box = wx.BoxSizer(wx.VERTICAL)
+		
 		data_box.Add(nome_box, 0, wx.EXPAND)
 		data_box.AddSpacer(10) # Add space
 		data_box.Add(id_box, 0)
@@ -73,6 +87,8 @@ class App(wx.Frame):
 		data_box.Add(cfg_box, 0)
 		data_box.AddSpacer(10) # Add space
 		data_box.Add(vmc_box, 0)
+		data_box.AddSpacer(10) # Add space
+		data_box.Add(vmc_content_box, 0)
 
 		# **** GAME DATA WIDGETS ****
 
@@ -86,6 +102,8 @@ class App(wx.Frame):
 		self.Bind(wx.EVT_MENU, self.__CloseApp, closeapp) # "Open Folder" on menu bar
 		self.Bind(wx.EVT_LIST_ITEM_FOCUSED, self.__show_data, self.opcoes) # Focused item in the list
 		self.Bind(wx.EVT_BUTTON, self.__change_vmc, vmc_changing) # VMC Changing button
+		self.Bind(wx.EVT_BUTTON, self._fill_vmc_content, self.vmc_content_btn)
+		self.Bind(wx.EVT_LIST_ITEM_RIGHT_CLICK, self.on_right_click, self.vmc_content_list)
 
 		self.SetSizer(janela)
 		self.Show()
@@ -99,10 +117,8 @@ class App(wx.Frame):
 
 		self.__fill_listctrl(folder=f_diag.GetPath())
 
-
 	def __CloseApp(self, event=None):
 		self.Close()
-
 
 	def __fill_listctrl(self, event=None, folder=''):
 		if folder == '':
@@ -131,7 +147,7 @@ class App(wx.Frame):
 
 		if (len(games) == 0):
 			self.__show_message("Nenhum jogo foi encontrado.")
-
+	
 		games.sort(key=lambda k: k['nome'], reverse=True)
 
 		self.games =  games
@@ -139,21 +155,19 @@ class App(wx.Frame):
 		for game in games:
 			nome   = game['nome']
 			codigo = game['codigo']
-			self.__add_line(nome, codigo)
+			self.__add_line(self.opcoes, [nome, codigo])
 
-
-	def __add_line(self, nome, codigo, event=None):
-		self.opcoes.InsertItem(0, nome)
-		self.opcoes.SetItem(0, 1, codigo)
-
+	def __add_line(self, obj, items):
+		obj.InsertItem(0, items[0])
+		obj.SetItem(0, 1, items[1])
 
 	def __show_message(self, texto):
 		dlg = wx.MessageDialog(self, texto, "Aviso")
 		dlg.ShowModal()
 		dlg.Destroy()
 
-
 	def __show_data(self, event=''):
+		self.vmc_content_list.DeleteAllItems()
 		jogos = list(reversed(self.games))
 		self.rel_nome.SetValue(jogos[event.GetIndex()]["nome"])
 		self.codigo.SetValue(jogos[event.GetIndex()]["codigo"])
@@ -164,9 +178,12 @@ class App(wx.Frame):
 		vmc_file = vmc_name.get_vmc_file()
 
 		if not vmc_file:
+			self.vmc_content_btn.Disable()
 			self.vmc.SetValue("**Nenhum arquivo**")
 		else:
+			self.vmc_content_btn.Enable()
 			self.vmc.SetValue(str(vmc_name.get_vmc_file()) + ".bin")
+			self.global_vmc_name = self.folder.strip("\\") + "\\VMC\\" + vmc_file + ".bin"
 
 
 		cfg_file = jogos[event.GetIndex()]["codigo"] + ".cfg"
@@ -197,13 +214,86 @@ class App(wx.Frame):
 				vmc_open.SetMessage("Abra um arquivo *.bin")
 				vmc_open.ShowModal()
 			
-		vmc_name = vmc_open.GetFilename()
+		self.vmc_name = vmc_open.GetFilename()
 		vmc_open.Destroy()
-		game_cfg.set_vmc_file(vmc_name)
+		game_cfg.set_vmc_file(self.vmc_name)
 
 		self.vmc.SetValue(os.path.basename(vmc_name))
-		
 
+	def _fill_vmc_content(self, event):
+		self.vmc_content_list.DeleteAllItems()
+
+		arq_vmc = open(self.global_vmc_name, 'r+b')
+
+		mc = ps2mc.ps2mc(arq_vmc)
+		
+		try:
+			for save in mc.dir_open("/"):
+				if save[8] not in [".", ".."]:
+					nome = save[8]
+					nome2 = "/" + nome
+					tamanho = mc.dir_size(nome2)
+					self.__add_vmc_line(self.vmc_content_list, [nome, tamanho])
+		finally:
+			arq_vmc.close()
+
+	def __add_vmc_line(self, obj, items):
+		obj.InsertItem(0, items[0])
+		obj.SetItem(0, 1, str(items[1]/1024) + "KB")
+
+	def __import(self, savefile):
+		ps2save_ins = ps2save.ps2_save_file()
+		file = file(savefile, "rb")
+		try:
+			ft = ps2save.detect_file_type(file)
+			file.seek(0)
+			if ft == "max":
+				ps2save_ins.load_max_drive(file)
+			elif ft == "psu":
+				ps2save_ins.load_ems(file)
+			elif ft == "cbs":
+				ps2save_ins.load_codebreaker(file)
+			elif ft == "sps":
+				ps2save_ins.load_sharkport(file)
+			elif ft == "npo":
+				self.error_box(savefile + ": nPort saves"
+					       " are not supported.")
+				return
+			else:
+				self.error_box(savefile + ": Save file format not"
+					       " recognized.")
+				return
+		finally:
+			f.close()
+
+		if not self.mc.import_save_file(ps2save_ins, True):
+			self.error_box(fn + ": Save file already present.")
+		
+	def on_right_click(self, event):
+		
+		buttons = {
+			wx.NewId(): "Importar",
+			wx.NewId(): "Exportar",
+			wx.NewId(): "Deletar"
+		}
+
+		self.buttons = buttons
+
+		rc_menu = wx.Menu()
+		for (id, button) in buttons.items():
+			rc_menu.Append(id, button)
+
+			wx.EVT_MENU(rc_menu, id, self.on_sel_right_click)
+
+		rc_menu.InsertSeparator(2)
+		# For a reason I couldn't realize, the "GetPoint" was returning a position related to the whole panel
+		pos = event.GetPoint()[0] + 361, event.GetPoint()[1] + 125
+		self.panel.PopupMenu(rc_menu, pos)
+
+	def on_sel_right_click(self, event):
+		clicked_opt = self.buttons[ event.GetId() ]
+
+		print clicked_opt
 
 if __name__ == '__main__':
 	app = wx.App(False)
